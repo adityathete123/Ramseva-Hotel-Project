@@ -5,10 +5,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Textarea } from '../../components/ui/textarea';
-import { ArrowLeft, Calendar, Search, CreditCard, CheckCircle, Users, Bed, Wifi, Coffee, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Calendar, CreditCard, CheckCircle, Bed } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function SearchAndBook() {
@@ -35,7 +35,7 @@ export default function SearchAndBook() {
   // Booking form
   const [bookingForm, setBookingForm] = useState({
     guestName: user?.name || '',
-    guestPhone: user?.phone || '',
+    guestPhone: (user as any)?.phone || '',
     guestEmail: user?.email || '',
     numberOfGuests: 2,
     specialRequests: '',
@@ -45,16 +45,35 @@ export default function SearchAndBook() {
   const [booking, setBooking] = useState(false);
   const [bookingComplete, setBookingComplete] = useState<any>(null);
 
+  // Hotel payment details from DB
+  const [paymentDetails, setPaymentDetails] = useState<{ upi_id: string | null; qr_code_url: string | null } | null>(null);
+
   useEffect(() => {
     if (user) {
       setBookingForm(prev => ({
         ...prev,
         guestName: user.name,
         guestEmail: user.email,
-        guestPhone: user.phone || ''
+        guestPhone: (user as any).phone || ''
       }));
     }
   }, [user]);
+
+  useEffect(() => {
+    const fetchPaymentDetails = async () => {
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        const res = await fetch(`${apiUrl}/api/payment/details`);
+        if (res.ok) {
+          const result = await res.json();
+          setPaymentDetails(result.data);
+        }
+      } catch (err) {
+        console.error('Could not fetch payment details', err);
+      }
+    };
+    fetchPaymentDetails();
+  }, []);
 
   const calculateNights = (checkIn: string, checkOut: string) => {
     if (!checkIn || !checkOut) return 0;
@@ -426,12 +445,23 @@ export default function SearchAndBook() {
                    <CardHeader><CardTitle className="text-lg flex items-center gap-2 font-black text-[#0d7377]"><CreditCard className="w-5 h-5"/> Advance Payment</CardTitle></CardHeader>
                    <CardContent className="space-y-6">
                       <div className="text-center bg-white p-6 rounded-xl shadow-sm border border-[#0d7377]/10">
-                         <p className="text-sm font-bold text-muted-foreground mb-4">Scan & Pay 30% Advance to Reserve</p>
-                         <div className="w-40 h-40 bg-muted mx-auto mb-4 rounded-lg flex items-center justify-center font-mono text-xs text-muted-foreground">
-                            QR CODE
-                         </div>
-                         <p className="text-2xl font-black text-[#0d7377]">₹{calculateAdvancePayment(calculateTotalCost(selectedRoom.base_price).total).toLocaleString()}</p>
-                         <p className="text-xs font-bold text-muted-foreground mt-1 uppercase">UPI ID: panchavati@upi</p>
+                          <p className="text-sm font-bold text-muted-foreground mb-4">Scan &amp; Pay 30% Advance to Reserve</p>
+                          {paymentDetails?.qr_code_url ? (
+                            <img
+                              src={paymentDetails.qr_code_url}
+                              alt="Hotel Payment QR Code"
+                              className="w-40 h-40 mx-auto mb-4 rounded-lg object-contain border"
+                            />
+                          ) : (
+                            <div className="w-40 h-40 bg-muted mx-auto mb-4 rounded-lg flex flex-col items-center justify-center gap-1">
+                              <span className="text-2xl">📱</span>
+                              <span className="text-[10px] font-mono text-muted-foreground">QR not configured</span>
+                            </div>
+                          )}
+                          <p className="text-2xl font-black text-[#0d7377]">₹{calculateAdvancePayment(calculateTotalCost(selectedRoom.base_price).total).toLocaleString()}</p>
+                          <p className="text-xs font-bold text-muted-foreground mt-1 uppercase">
+                            UPI ID: {paymentDetails?.upi_id || 'Contact hotel'}
+                          </p>
                       </div>
 
                       <div className="space-y-2">

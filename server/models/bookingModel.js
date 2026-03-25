@@ -195,6 +195,87 @@ const BookingModel = {
       inHouse: inHouseRows[0].inHouse,
       revenueByType
     };
+  },
+
+  /**
+   * Extend a booking's check-out date and update total amount.
+   */
+  async extendStay(id, newCheckOut, newTotalAmount) {
+    await pool.execute(
+      `UPDATE bookings SET check_out = ?, total_amount = ? WHERE id = ?`,
+      [newCheckOut, newTotalAmount, id]
+    );
+    return true;
+  },
+
+  /**
+   * Find today's check-ins (bookings with check_in = today, not cancelled).
+   */
+  async findTodayCheckIns() {
+    const [rows] = await pool.execute(
+      `SELECT b.*,
+        rt.name as room_type_name, rt.base_price,
+        c.name as customer_name, c.phone as customer_phone, c.email as customer_email
+       FROM bookings b
+       LEFT JOIN room_types rt ON b.room_type_id = rt.id
+       LEFT JOIN customers c ON b.customer_id = c.id
+       WHERE DATE(b.check_in) = CURDATE()
+         AND b.status NOT IN ('cancelled')
+       ORDER BY b.check_in ASC`
+    );
+    return rows;
+  },
+
+  /**
+   * Find bookings by status.
+   */
+  async findByStatus(status) {
+    const [rows] = await pool.execute(
+      `SELECT b.*,
+        rt.name as room_type_name,
+        c.name as customer_name, c.phone as customer_phone
+       FROM bookings b
+       LEFT JOIN room_types rt ON b.room_type_id = rt.id
+       LEFT JOIN customers c ON b.customer_id = c.id
+       WHERE b.status = ?
+       ORDER BY b.created_at DESC`,
+      [status]
+    );
+    return rows;
+  },
+
+  /**
+   * Get hotel payment details (active UPI + QR).
+   */
+  async getHotelPaymentDetails() {
+    const [rows] = await pool.execute(
+      `SELECT * FROM hotel_payment_details WHERE is_active = 1 LIMIT 1`
+    );
+    return rows[0] || null;
+  },
+
+  /**
+   * Record a payment submission.
+   */
+  async recordPayment({ booking_id, amount, method, transaction_id }) {
+    const [result] = await pool.execute(
+      `INSERT INTO payments (booking_id, amount, method, transaction_id, status)
+       VALUES (?, ?, ?, ?, 'pending_verification')
+       ON DUPLICATE KEY UPDATE transaction_id = VALUES(transaction_id), status = 'pending_verification', updated_at = CURRENT_TIMESTAMP`,
+      [booking_id, amount, method || 'upi', transaction_id]
+    );
+    return result;
+  },
+
+  /**
+   * Verify a payment (receptionist action).
+   */
+  async verifyPayment(bookingId, verifiedBy) {
+    await pool.execute(
+      `UPDATE payments SET status = 'completed', verified_by = ?, verified_at = NOW() WHERE booking_id = ?`,
+      [verifiedBy, bookingId]
+    );
+    return true;
   }
 };
 

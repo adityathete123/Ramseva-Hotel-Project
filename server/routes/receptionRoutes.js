@@ -29,7 +29,7 @@ router.post(
   receptionController.checkOut
 );
 
-// GET /api/reception/bookings — List all hotel bookings
+// GET /api/reception/bookings — Dashboard data (all bookings + rooms + stats)
 router.get(
   '/bookings',
   verifyToken,
@@ -37,4 +37,37 @@ router.get(
   receptionController.getDashboardData
 );
 
+// PUT /api/reception/extend-stay/:id — Extend a guest's stay
+router.put(
+  '/extend-stay/:id',
+  verifyToken,
+  authorizeRoles('receptionist', 'admin'),
+  receptionController.extendStay
+);
+
+// GET /api/reception/guests — Full guest list with payment info
+router.get(
+  '/guests',
+  verifyToken,
+  authorizeRoles('receptionist', 'admin'),
+  receptionController.getGuestList
+);
+
+// GET /api/reception/today-checkins — Today's check-ins
+router.get(
+  '/today-checkins',
+  verifyToken,
+  authorizeRoles('receptionist', 'admin'),
+  receptionController.getTodayCheckIns
+);
+
+// GET /api/reception/pending — Bookings pending payment verification
+router.get(
+  '/pending',
+  verifyToken,
+  authorizeRoles('receptionist', 'admin'),
+  receptionController.getPendingVerification
+);
+
 module.exports = router;
+

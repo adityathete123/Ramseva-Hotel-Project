@@ -1,6 +1,7 @@
 const BookingModel = require('../models/bookingModel');
 const CustomerModel = require('../models/customerModel');
 const RoomModel = require('../models/roomModel');
+const { pool } = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
 
 const receptionController = {
@@ -181,7 +182,149 @@ const receptionController = {
         message: 'Failed to fetch dashboard data'
       });
     }
+  },
+
+  /**
+   * Extend a booking's stay.
+   * PUT /api/reception/extend-stay/:id
+   * Body: { newCheckOut }
+   */
+  async extendStay(req, res) {
+    try {
+      const { id } = req.params;
+      const { newCheckOut } = req.body;
+
+      if (!newCheckOut) {
+        return res.status(400).json({
+          success: false,
+          message: 'newCheckOut date is required'
+        });
+      }
+
+      const booking = await BookingModel.findById(id);
+      if (!booking) {
+        return res.status(404).json({ success: false, message: 'Booking not found' });
+      }
+
+      if (!['confirmed', 'checked_in'].includes(booking.status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot extend a booking with status: ${booking.status}`
+        });
+      }
+
+      const newCheckOutDate = new Date(newCheckOut);
+      const oldCheckOutDate = new Date(booking.check_out);
+
+      if (newCheckOutDate <= oldCheckOutDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'New check-out date must be after current check-out date'
+        });
+      }
+
+      // Recalculate total amount based on new duration
+      const checkIn = new Date(booking.check_in);
+      const diffTime = Math.abs(newCheckOutDate.getTime() - checkIn.getTime());
+      const nights = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+      const subtotal = booking.base_price * nights;
+      const gst = subtotal * 0.12;
+      const newTotal = subtotal + gst;
+
+      await BookingModel.extendStay(id, newCheckOut, newTotal);
+
+      res.json({
+        success: true,
+        message: 'Stay extended successfully',
+        data: {
+          bookingId: id,
+          oldCheckOut: booking.check_out,
+          newCheckOut,
+          nights,
+          newTotal
+        }
+      });
+    } catch (error) {
+      console.error('Extend stay error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to extend stay'
+      });
+    }
+  },
+
+  /**
+   * Get full guest list with payment info.
+   * GET /api/reception/guests
+   */
+  async getGuestList(req, res) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT b.*,
+          rt.name as room_type_name, rt.base_price,
+          c.name as customer_name, c.phone as customer_phone, c.email as customer_email,
+          c.id_type, c.id_number, c.address,
+          r.room_number,
+          p.transaction_id, p.method as payment_method, p.status as payment_status, p.amount as paid_amount
+         FROM bookings b
+         LEFT JOIN room_types rt ON b.room_type_id = rt.id
+         LEFT JOIN customers c ON b.customer_id = c.id
+         LEFT JOIN rooms r ON b.room_id = r.id
+         LEFT JOIN payments p ON b.id = p.booking_id
+         WHERE b.status NOT IN ('cancelled')
+         ORDER BY b.check_in DESC`
+      );
+
+      res.json({ success: true, data: rows });
+    } catch (error) {
+      console.error('Get guest list error:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch guest list' });
+    }
+  },
+
+  /**
+   * Get today's check-ins.
+   * GET /api/reception/today-checkins
+   */
+  async getTodayCheckIns(req, res) {
+    try {
+      const bookings = await BookingModel.findTodayCheckIns();
+      res.json({
+        success: true,
+        data: bookings,
+        count: bookings.length
+      });
+    } catch (error) {
+      console.error('Get today check-ins error:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch today\'s check-ins' });
+    }
+  },
+
+  /**
+   * Get pending verification bookings.
+   * GET /api/reception/pending
+   */
+  async getPendingVerification(req, res) {
+    try {
+      const bookings = await BookingModel.findByStatus('pending_verification');
+
+      const enriched = await Promise.all(
+        bookings.map(async (b) => {
+          const [payments] = await pool.execute(
+            `SELECT * FROM payments WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1`,
+            [b.id]
+          );
+          return { ...b, payment: payments[0] || null };
+        })
+      );
+
+      res.json({ success: true, data: enriched, count: enriched.length });
+    } catch (error) {
+      console.error('Get pending verification error:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch pending bookings' });
+    }
   }
 };
 
 module.exports = receptionController;
+
